@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/build
+**/.svelte-kit
+**/.turbo
+.git
+.env
+.env.*
+!.env.example
+**/*.log
+releases
+.pnpm-store

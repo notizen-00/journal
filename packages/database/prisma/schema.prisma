@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JournalStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum PageStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum BuildStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum SyncStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum DeploymentStatus {
+  PENDING
+  ACTIVE
+  ROLLED_BACK
+  FAILED
+}
+
+/// Admin/editor accounts for the Publisher dashboard (PRD §31 - Authentication).
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("admin")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
+}
+
+/// A managed journal (PRD §6.1).
+model Journal {
+  id          String        @id @default(uuid())
+  name        String
+  acronym     String?
+  issn        String?
+  eissn       String?
+  description String?
+  logoUrl     String?
+  domain      String?       @unique
+  themeId     String?
+  status      JournalStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  source        JournalSource?
+  pages         Page[]
+  menus         Menu[]
+  media         Media[]
+  theme         Theme?         @relation(fields: [themeId], references: [id])
+  themeSettings ThemeSetting[]
+  articles      Article[]
+  issues        Issue[]
+  builds        Build[]
+  deployments   Deployment[]
+  syncRuns      SyncRun[]
+
+  @@map("journals")
+}
+
+/// OJS connection + OAI endpoint for a journal (PRD §6.1, §7).
+model JournalSource {
+  id            String   @id @default(uuid())
+  journalId     String   @unique
+  ojsUrl        String
+  oaiEndpoint   String
+  oaiSetSpec    String?
+  /// Reference into the secret store, never the credential itself (PRD §32).
+  credentialRef String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  journal Journal @relation(fields: [journalId], references: [id], onDelete: Cascade)
+
+  @@map("journal_sources")
+}
+
+/// A static page owned by the CMS (PRD §10).
+model Page {
+  id        String     @id @default(uuid())
+  journalId String
+  slug      String
+  title     String
+  status    PageStatus @default(DRAFT)
+  /// Current block tree (PRD §13), mirrored into PageVersion on publish.
+  blocks    Json?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  journal  Journal       @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  versions PageVersion[]
+
+  @@unique([journalId, slug])
+  @@map("pages")
+}
+
+/// Immutable snapshot created on publish, enables rollback (PRD §22).
+model PageVersion {
+  id          String     @id @default(uuid())
+  pageId      String
+  version     Int
+  contentJson Json
+  status      PageStatus @default(DRAFT)
+  createdAt   DateTime   @default(now())
+
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@unique([pageId, version])
+  @@map("page_versions")
+}
+
+model Menu {
+  id        String   @id @default(uuid())
+  journalId String
+  name      String
+  location  String   @default("primary")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  journal Journal    @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  items   MenuItem[]
+
+  @@map("menus")
+}
+
+model MenuItem {
+  id       String  @id @default(uuid())
+  menuId   String
+  parentId String?
+  label    String
+  url      String
+  order    Int     @default(0)
+
+  menu     Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  parent   MenuItem?  @relation("MenuItemChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children MenuItem[] @relation("MenuItemChildren")
+
+  @@map("menu_items")
+}
+
+/// Journal-owned media, stored in MinIO, separate from OJS (PRD §33).
+model Media {
+  id        String   @id @default(uuid())
+  journalId String
+  fileName  String
+  url       String
+  mimeType  String
+  size      Int
+  createdAt DateTime @default(now())
+
+  journal Journal @relation(fields: [journalId], references: [id], onDelete: Cascade)
+
+  @@map("media")
+}
+
+/// Installed theme (PRD §14): default / modern / journal.
+model Theme {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  journals      Journal[]
+  themeSettings ThemeSetting[]
+
+  @@map("themes")
+}
+
+/// Per-journal, no-code theme configuration (PRD §15).
+model ThemeSetting {
+  id        String   @id @default(uuid())
+  journalId String
+  themeId   String
+  settings  Json
+  updatedAt DateTime @updatedAt
+
+  journal Journal @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  theme   Theme   @relation(fields: [themeId], references: [id], onDelete: Cascade)
+
+  @@unique([journalId, themeId])
+  @@map("theme_settings")
+}
+
+model Author {
+  id          String @id @default(uuid())
+  name        String
+  affiliation String?
+  orcid       String?
+
+  articleAuthors ArticleAuthor[]
+
+  @@map("authors")
+}
+
+/// Harvested + normalized issue metadata (PRD §7, §23).
+model Issue {
+  id              String    @id @default(uuid())
+  journalId       String
+  oaiIdentifier   String?
+  volume          String?
+  number          String?
+  year            Int?
+  title           String?
+  publicationDate DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  journal  Journal   @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  articles Article[]
+
+  @@unique([journalId, oaiIdentifier])
+  @@map("issues")
+}
+
+/// Harvested + normalized article metadata, mirrored statically (PRD §7, §23).
+model Article {
+  id              String    @id @default(uuid())
+  journalId       String
+  issueId         String?
+  oaiIdentifier   String
+  title           String
+  abstract        String?
+  keywords        String[]  @default([])
+  doi             String?
+  pages           String?
+  pdfUrl          String?
+  url             String?
+  slug            String
+  publicationDate DateTime?
+  /// Raw OAI-PMH record, kept for debugging/re-normalization.
+  rawMetadata     Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  journal Journal         @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  issue   Issue?          @relation(fields: [issueId], references: [id])
+  authors ArticleAuthor[]
+
+  @@unique([journalId, oaiIdentifier])
+  @@unique([journalId, slug])
+  @@map("articles")
+}
+
+model ArticleAuthor {
+  articleId String
+  authorId  String
+  order     Int    @default(0)
+
+  article Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  author  Author  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, authorId])
+  @@map("article_authors")
+}
+
+/// One static-site build (PRD §16, §18, §20, §30).
+model Build {
+  id            String      @id @default(uuid())
+  journalId     String
+  status        BuildStatus @default(PENDING)
+  pagesCount    Int?
+  articlesCount Int?
+  assetsCount   Int?
+  errorMessage  String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime    @default(now())
+
+  journal    Journal      @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  buildPages BuildPage[]
+  deployment Deployment?
+
+  @@map("builds")
+}
+
+/// Individual output paths produced by a build (PRD §17, §20).
+model BuildPage {
+  id      String @id @default(uuid())
+  buildId String
+  path    String
+
+  build Build @relation(fields: [buildId], references: [id], onDelete: Cascade)
+
+  @@map("build_pages")
+}
+
+/// Atomic release activation record (PRD §19).
+model Deployment {
+  id          String           @id @default(uuid())
+  journalId   String
+  buildId     String           @unique
+  status      DeploymentStatus @default(PENDING)
+  releasePath String
+  activatedAt DateTime?
+  createdAt   DateTime         @default(now())
+
+  journal Journal @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  build   Build   @relation(fields: [buildId], references: [id], onDelete: Cascade)
+
+  @@map("deployments")
+}
+
+/// One OAI harvesting run, manual/scheduled/webhook-triggered (PRD §8).
+model SyncRun {
+  id              String     @id @default(uuid())
+  journalId       String
+  status          SyncStatus @default(PENDING)
+  fromDate        DateTime?
+  toDate          DateTime?
+  resumptionToken String?
+  errorMessage    String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime   @default(now())
+
+  journal   Journal    @relation(fields: [journalId], references: [id], onDelete: Cascade)
+  syncItems SyncItem[]
+
+  @@map("sync_runs")
+}
+
+/// Per-record outcome within a sync run, for auditability.
+model SyncItem {
+  id            String   @id @default(uuid())
+  syncRunId     String
+  oaiIdentifier String
+  status        String
+  message       String?
+  createdAt     DateTime @default(now())
+
+  syncRun SyncRun @relation(fields: [syncRunId], references: [id], onDelete: Cascade)
+
+  @@map("sync_items")
+}

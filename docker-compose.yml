@@ -1,0 +1,181 @@
+name: journal-publisher
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-journal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-journal}
+      POSTGRES_DB: ${POSTGRES_DB:-journal_publisher}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-journal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-journaladmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-journalsecret}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-journaladmin} ${MINIO_ROOT_PASSWORD:-journalsecret} &&
+      mc mb -p local/${MINIO_BUCKET:-journal-media} &&
+      mc anonymous set download local/${MINIO_BUCKET:-journal-media}
+      "
+
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/database/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://journal:journal@postgres:5432/journal_publisher?schema=public}
+
+  seed:
+    build:
+      context: .
+      dockerfile: packages/database/Dockerfile
+    entrypoint: ["pnpm", "run", "seed"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://journal:journal@postgres:5432/journal_publisher?schema=public}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@unej.ac.id}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-change-me-in-production}
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://journal:journal@postgres:5432/journal_publisher?schema=public}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_PORT: 3000
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1d}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080,http://localhost:5174}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change-me-in-production}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-journaladmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-journalsecret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-journal-media}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000/journal-media}
+    ports:
+      - "${API_PORT:-3000}:3000"
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://journal:journal@postgres:5432/journal_publisher?schema=public}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      API_BASE_URL: http://api:3000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change-me-in-production}
+      BUILD_OUTPUT_DIR: /data/releases
+      BUILD_CONCURRENCY: ${BUILD_CONCURRENCY:-1}
+      OAI_SYNC_INTERVAL_MS: 600000
+      REPO_ROOT: /repo
+    volumes:
+      - releases:/data/releases
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      PORT: 3000
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:3000}
+    ports:
+      - "${ADMIN_PORT:-5174}:3000"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: infra/nginx/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      admin:
+        condition: service_started
+      api:
+        condition: service_started
+    environment:
+      DEFAULT_JOURNAL_ID: ${DEFAULT_JOURNAL_ID:-default}
+    volumes:
+      - releases:/data/releases:ro
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  releases:
