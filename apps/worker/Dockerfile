@@ -2,8 +2,8 @@
 # The worker needs the whole monorepo (not just its own package) because it
 # shells out to `pnpm --filter @journal/web-builder build` to run the static
 # builder as part of processing a static-build job (PRD §16, §18).
-FROM node:20-alpine AS base
-RUN apk add --no-cache openssl
+FROM node:24.19-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /repo
 

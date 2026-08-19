@@ -4,7 +4,7 @@
 # API_BASE_URL and INTERNAL_API_TOKEN as build args. The worker container
 # normally runs this same `pnpm --filter @journal/web-builder build` command
 # itself instead of using this image (PRD §16, §18).
-FROM node:20-alpine AS build
+FROM node:24.19-slim AS build
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /repo
 

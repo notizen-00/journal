@@ -15,6 +15,9 @@ const config = {
     }),
     prerender: {
       handleHttpError: "warn",
+      // A journal with no custom pages beyond home makes /[slug]'s
+      // entries() return [] — a valid state, not a crawl failure.
+      handleUnseenRoutes: "warn",
     },
   },
 };

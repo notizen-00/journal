@@ -16,7 +16,7 @@
 </svelte:head>
 
 <div class="site" style={themeVars}>
-  <Header journal={data.journal} menu={primaryMenu} />
+  <Header journal={data.journal} menu={primaryMenu} pages={data.pages} articles={data.articles} />
   <main>
     <slot />
   </main>

@@ -13,7 +13,8 @@ const presets: Record<string, Record<string, string>> = {
     "--theme-fg": "#111827",
     "--theme-muted": "#6b7280",
     "--theme-border": "#e5e7eb",
-    "--theme-font": "system-ui, sans-serif",
+    "--theme-surface": "#f8fafc",
+    "--theme-font": "'Inter', system-ui, sans-serif",
   },
   modern: {
     "--theme-primary": "#7c3aed",

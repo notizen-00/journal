@@ -21,6 +21,8 @@ export interface JournalData {
   id: string;
   name: string;
   acronym: string | null;
+  issn: string | null;
+  eissn: string | null;
   description: string | null;
   logoUrl: string | null;
   theme: { key: string } | null;

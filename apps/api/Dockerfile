@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM node:20-alpine AS base
+
+FROM node:24.19-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /repo
 
@@ -18,9 +20,10 @@ COPY . .
 RUN pnpm --filter @journal/database build
 RUN pnpm --filter @journal/api build
 RUN pnpm deploy --filter=@journal/api --prod /out/api
+RUN node apps/api/scripts/copy-prisma-client.js /out/api
 
-FROM node:20-alpine AS runtime
-RUN apk add --no-cache openssl
+FROM node:24.19-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /out/api ./
