@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy } from "svelte";
   import { page } from "$app/stores";
   import { api } from "$lib/api";
-  import { breadcrumbs } from "$lib/ui";
+  import { getBreadcrumbs } from "$lib/ui";
+
+  const breadcrumbs = getBreadcrumbs();
   import { toastError } from "$lib/toast";
   import { connectJournalEvents, type RealtimeStore } from "$lib/realtime";
   import { readable, type Readable } from "svelte/store";
@@ -43,7 +45,9 @@
 
   $: breadcrumbs.set([
     { label: "Journals", href: "/journals" },
-    { label: journal?.name ?? "Journal" },
+    // Only a real link while a sub-tab is active — on Overview itself,
+    // this crumb already *is* the current page.
+    { label: journal?.name ?? "Journal", href: tab ? `/journals/${journalId}` : undefined },
     ...(tab ? [{ label: TAB_LABELS[tab] ?? tab }] : []),
   ]);
 
@@ -67,11 +71,13 @@
 
   $: if (journalId) void loadJournal();
 
-  onMount(() => () => live?.close());
-  onDestroy(() => {
-    live?.close();
-    breadcrumbs.set([]);
-  });
+  // No breadcrumb clear here: every route sets its own full trail
+  // unconditionally (see the reactive block above), and during SSR
+  // onDestroy fires synchronously right after this component renders —
+  // clearing here would wipe the store before the layout's header, which
+  // now renders after the slot specifically so it can read this, ever
+  // sees it.
+  onDestroy(() => live?.close());
 
   $: connection = $liveStore.connection;
 </script>
@@ -79,23 +85,18 @@
 <svelte:head><title>{journal?.name ?? "Journal"} · Journal Publisher</title></svelte:head>
 
 <div class="page-head">
-  <div class="titles">
-    <h1>{journal?.name ?? "…"}</h1>
-    <div class="sub">
-      {#if journal?.acronym}<span class="muted">{journal.acronym}</span>{/if}
-      {#if journal?.domain}<span class="muted">· {journal.domain}</span>{/if}
-      <span
-        class="conn conn-{connection}"
-        title={connection === "live"
-          ? "Receiving realtime updates"
-          : connection === "connecting"
-            ? "Connecting to the realtime feed"
-            : "Realtime feed unavailable — retrying"}
-      >
-        {#if connection === "live"}<span class="live-dot"></span>Live{:else if connection === "connecting"}Connecting…{:else}Offline{/if}
-      </span>
-    </div>
-  </div>
+  {#if journal?.acronym}<span class="muted">{journal.acronym}</span>{/if}
+  {#if journal?.domain}<span class="muted">· {journal.domain}</span>{/if}
+  <span
+    class="conn conn-{connection}"
+    title={connection === "live"
+      ? "Receiving realtime updates"
+      : connection === "connecting"
+        ? "Connecting to the realtime feed"
+        : "Realtime feed unavailable — retrying"}
+  >
+    {#if connection === "live"}<span class="live-dot"></span>Live{:else if connection === "connecting"}Connecting…{:else}Offline{/if}
+  </span>
 </div>
 
 {#key journalId}
@@ -120,17 +121,11 @@
 
 <style>
   .page-head {
-    margin-bottom: 1.25rem;
-  }
-  .titles h1 {
-    line-height: 1.2;
-  }
-  .sub {
     display: flex;
     align-items: center;
     gap: 0.4rem;
     flex-wrap: wrap;
-    margin-top: 0.3rem;
+    margin-bottom: 1.25rem;
     font-size: 0.8125rem;
   }
   .conn {

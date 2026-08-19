@@ -1,11 +1,21 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api";
+  import { getBreadcrumbs } from "$lib/ui";
+
+  const breadcrumbs = getBreadcrumbs();
   import { toasts, toastError } from "$lib/toast";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import SkeletonRows from "$lib/components/SkeletonRows.svelte";
   import StatusPill from "$lib/components/StatusPill.svelte";
   import Pagination from "$lib/components/Pagination.svelte";
+
+  // No clear-on-destroy: every route sets its own full breadcrumb trail
+  // unconditionally, so there's nothing for a stale value to leak from —
+  // and during SSR, onDestroy fires synchronously right after this
+  // component renders (there's no persistent instance), which would wipe
+  // the store before the layout's header ever reads it.
+  breadcrumbs.set([{ label: "Journals" }]);
 
   interface Journal {
     id: string;
@@ -88,10 +98,7 @@
 <svelte:head><title>Journals · Journal Publisher</title></svelte:head>
 
 <div class="page-head">
-  <div>
-    <h1>Journals</h1>
-    <p class="muted">Manage every journal this instance publishes.</p>
-  </div>
+  <p class="muted">Manage every journal this instance publishes.</p>
   <button class="btn btn-primary" on:click={() => (showForm = !showForm)}>
     {showForm ? "Cancel" : "+ New journal"}
   </button>
@@ -212,14 +219,13 @@
 <style>
   .page-head {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 1rem;
     flex-wrap: wrap;
     margin-bottom: 1.25rem;
   }
   .page-head p {
-    margin-top: 0.2rem;
     font-size: 0.875rem;
   }
   .create-card {

@@ -3,9 +3,13 @@
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import { token } from "$lib/auth";
-  import { breadcrumbs } from "$lib/ui";
+  import { createBreadcrumbsContext } from "$lib/ui";
   import Toaster from "$lib/components/Toaster.svelte";
   import "../app.css";
+
+  // Created fresh per component-tree instance (per SSR request) — see the
+  // comment in ui.ts for why this can't be a plain module-level store.
+  const breadcrumbs = createBreadcrumbsContext();
 
   $: isLoginPage = $page.url.pathname === "/login";
   $: journalId = $page.params.id ?? "";
@@ -110,6 +114,13 @@
     ></button>
 
     <div class="main-col">
+      <!--
+        Breadcrumb labels (journal name, page title) come from client-only
+        fetches — there's no server-side auth token to fetch them with
+        during SSR — so the trail is necessarily empty on the very first
+        server-rendered paint and fills in right after hydration, once each
+        route's own script runs and populates the shared context store.
+      -->
       <header class="topbar">
         <button class="menu-toggle" aria-label="Toggle menu" on:click={() => (sidebarOpen = !sidebarOpen)}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
@@ -117,7 +128,7 @@
           </svg>
         </button>
         <nav class="crumbs" aria-label="Breadcrumb">
-          {#each $breadcrumbs as crumb, i (i)}
+          {#each $breadcrumbs as crumb, i (`${i}-${crumb.label}`)}
             {#if i > 0}<span class="crumb-sep" aria-hidden="true">/</span>{/if}
             {#if crumb.href && i < $breadcrumbs.length - 1}
               <a href={crumb.href}>{crumb.label}</a>
@@ -273,14 +284,14 @@
   }
 
   .crumbs {
-    display: flex;
-    align-items: center;
+    display: flow-root;
+    align-items: baseline;
     gap: 0.4rem;
-    font-size: 0.875rem;
     min-width: 0;
     overflow: hidden;
   }
   .crumbs a {
+    font-size: 0.8125rem;
     color: var(--fg-muted);
     text-decoration: none;
     white-space: nowrap;
@@ -289,10 +300,17 @@
     color: var(--brand-600);
   }
   .crumb-sep {
+    font-size: 0.8125rem;
     color: var(--fg-subtle);
   }
+  /* The trail (Journals / Journal Name / ...) stays small; the current
+     page's own segment stands in for a separate page-title row, so it
+     carries the visual weight a heading normally would — one row instead
+     of a breadcrumb strip stacked on top of each page's own title block. */
   .crumb-current {
-    font-weight: 600;
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     color: var(--fg);
     white-space: nowrap;
     overflow: hidden;
@@ -315,7 +333,6 @@
   main {
     flex: 1;
     padding: 1.5rem;
-    max-width: 84rem;
     width: 100%;
   }
 

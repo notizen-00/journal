@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
   import { page } from "$app/stores";
   import type { Block } from "@journal/shared-types";
   import { api } from "$lib/api";
-  import { breadcrumbs } from "$lib/ui";
+  import { getBreadcrumbs } from "$lib/ui";
+
+  const breadcrumbs = getBreadcrumbs();
   import { toasts, toastError } from "$lib/toast";
   import { normalizeBlocks } from "$lib/editor/blocks/defaults";
   import BlockEditor from "$lib/editor/blocks/BlockEditor.svelte";
@@ -22,6 +24,7 @@
   }
 
   let doc: PageDoc | null = null;
+  let journalName = "";
   let title = "";
   let blocks: Block[] = [];
   let loading = true;
@@ -42,7 +45,12 @@
   async function load() {
     loading = true;
     try {
-      doc = await api.get<PageDoc>(`/pages/${pageId}`);
+      const [pageDoc, journal] = await Promise.all([
+        api.get<PageDoc>(`/pages/${pageId}`),
+        api.get<{ name: string }>(`/journals/${journalId}`).catch(() => null),
+      ]);
+      doc = pageDoc;
+      journalName = journal?.name ?? "";
       title = doc.title;
       blocks = normalizeBlocks(doc.blocks ?? []);
       savedSnapshot = JSON.stringify({ title, blocks });
@@ -109,14 +117,19 @@
     if (dirty) e.preventDefault();
   }
 
+  // No clear-on-destroy: this always sets its own complete trail, and
+  // during SSR onDestroy fires synchronously right after render (no
+  // persistent instance) — clearing here would wipe the store before the
+  // layout's header, which renders after the slot specifically so it can
+  // read this, ever sees it.
   $: breadcrumbs.set([
     { label: "Journals", href: "/journals" },
+    { label: journalName || "Journal", href: `/journals/${journalId}` },
     { label: "Pages", href: `/journals/${journalId}?tab=pages` },
     { label: doc?.title ?? "Page" },
   ]);
 
   onMount(load);
-  onDestroy(() => breadcrumbs.set([]));
 </script>
 
 <svelte:head><title>{doc?.title ?? "Page"} · Journal Publisher</title></svelte:head>
@@ -126,16 +139,13 @@
   <div class="card"><div class="card-body"><p class="muted">Loading page…</p></div></div>
 {:else if doc}
   <div class="editor-head">
-    <a class="back" href={`/journals/${journalId}?tab=pages`}>← Pages</a>
-    <div class="head-meta">
-      <StatusPill status={doc.status} />
-      <span class="muted slug mono">/{doc.slug}</span>
-      {#if dirty}
-        <span class="pill pill-warning">Unsaved</span>
-      {:else if lastSavedAt}
-        <span class="muted saved-at">Saved {lastSavedAt.toLocaleTimeString()}</span>
-      {/if}
-    </div>
+    <StatusPill status={doc.status} />
+    <span class="muted slug mono">/{doc.slug}</span>
+    {#if dirty}
+      <span class="pill pill-warning">Unsaved</span>
+    {:else if lastSavedAt}
+      <span class="muted saved-at">Saved {lastSavedAt.toLocaleTimeString()}</span>
+    {/if}
   </div>
 
   <div class="card title-card">
@@ -180,23 +190,9 @@
   .editor-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+    gap: 0.5rem;
     flex-wrap: wrap;
     margin-bottom: 1rem;
-  }
-  .back {
-    font-size: 0.875rem;
-    text-decoration: none;
-    color: var(--fg-muted);
-  }
-  .back:hover {
-    color: var(--brand-600);
-  }
-  .head-meta {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
     font-size: 0.8125rem;
   }
   .slug {

@@ -1,5 +1,5 @@
 import type { Block, BlockType } from "@journal/shared-types";
-import { EMPTY_DOC } from "../serialize";
+import { EMPTY_DOC } from "../content";
 
 export interface BlockMeta {
   label: string;

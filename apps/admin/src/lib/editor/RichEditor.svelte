@@ -1,18 +1,27 @@
 <script lang="ts">
   import { createEventDispatcher, onMount, tick } from "svelte";
+  import type { Readable } from "svelte/store";
+  import { createEditor, EditorContent, type Editor } from "svelte-tiptap";
+  import StarterKit from "@tiptap/starter-kit";
+  import Underline from "@tiptap/extension-underline";
+  import Link from "@tiptap/extension-link";
+  import TiptapImage from "@tiptap/extension-image";
+  import TextAlign from "@tiptap/extension-text-align";
+  import Table from "@tiptap/extension-table";
+  import TableRow from "@tiptap/extension-table-row";
+  import TableCell from "@tiptap/extension-table-cell";
+  import TableHeader from "@tiptap/extension-table-header";
+  import Placeholder from "@tiptap/extension-placeholder";
+  import CharacterCount from "@tiptap/extension-character-count";
   import { api } from "$lib/api";
   import { toasts } from "$lib/toast";
-  import { EMPTY_DOC, docToHtml, docToText, htmlToDoc } from "./serialize";
+  import { EMPTY_DOC } from "./content";
 
   /**
-   * Hand-rolled rich text editor with a WordPress-style toolbar.
-   *
-   * Editing runs on `contenteditable` + `document.execCommand`. That API is
-   * formally deprecated, but it remains the only built-in browser primitive
-   * for rich text editing and is still implemented everywhere; the
-   * alternative is reimplementing selection/undo/IME handling from scratch.
-   * Everything it produces is normalized back into Tiptap JSON on save, so
-   * the deprecated bits never leak into stored content.
+   * Real Tiptap/ProseMirror editor. The JSON it reads and writes is exactly
+   * the `Page.blocks` shape the static site's `renderTiptapDoc` consumes, so
+   * there's no conversion layer between the two — `editor.getJSON()` is the
+   * stored doc.
    */
   export let content: unknown = EMPTY_DOC;
   /** Enables the media library picker in the image dialog. */
@@ -20,31 +29,7 @@
 
   const dispatch = createEventDispatcher<{ update: unknown }>();
 
-  let editorEl: HTMLDivElement;
-  let ready = false;
-
-  // Toolbar reflects the caret's current formatting.
-  let active = {
-    bold: false,
-    italic: false,
-    underline: false,
-    strike: false,
-    ul: false,
-    ol: false,
-    block: "p",
-  };
-
-  let showLinkDialog = false;
-  let linkUrl = "";
-  let savedRange: Range | null = null;
-
-  let showImageDialog = false;
-  let imageUrl = "";
-  let imageAlt = "";
-  let mediaItems: { id: string; fileName: string; url: string; mimeType: string }[] = [];
-  let mediaLoading = false;
-
-  let counts = { words: 0, chars: 0 };
+  let editor: Readable<Editor>;
 
   const BLOCK_OPTIONS = [
     { value: "p", label: "Paragraph" },
@@ -55,134 +40,84 @@
     { value: "pre", label: "Code block" },
   ];
 
+  $: currentBlock = !$editor
+    ? "p"
+    : $editor.isActive("heading", { level: 2 })
+      ? "h2"
+      : $editor.isActive("heading", { level: 3 })
+        ? "h3"
+        : $editor.isActive("heading", { level: 4 })
+          ? "h4"
+          : $editor.isActive("blockquote")
+            ? "blockquote"
+            : $editor.isActive("codeBlock")
+              ? "pre"
+              : "p";
+
+  let showLinkDialog = false;
+  let linkUrl = "";
+  let savedSelection: { from: number; to: number } | null = null;
+
+  let showImageDialog = false;
+  let imageUrl = "";
+  let imageAlt = "";
+  let mediaItems: { id: string; fileName: string; url: string; mimeType: string }[] = [];
+  let mediaLoading = false;
+
   onMount(() => {
-    // Without this, Chrome/Edge insert bare <div> elements for lines
-    // created by Enter instead of <p>. Our serializer always writes <p>,
-    // so every keystroke's round-tripped HTML would differ from the live
-    // DOM by tag name alone — which used to trip the (now-removed)
-    // string-comparison guard below and reset the caret on every line.
-    document.execCommand("defaultParagraphSeparator", false, "p");
-    editorEl.innerHTML = docToHtml(content) || "<p><br></p>";
-    ready = true;
-    recount();
+    editor = createEditor({
+      content: content && typeof content === "object" ? content : EMPTY_DOC,
+      extensions: [
+        StarterKit.configure({ heading: { levels: [2, 3, 4] } }),
+        Underline,
+        Link.configure({ openOnClick: false, autolink: true }),
+        TiptapImage,
+        TextAlign.configure({ types: ["paragraph", "heading"] }),
+        Table.configure({ resizable: false }),
+        TableRow,
+        TableHeader,
+        TableCell,
+        Placeholder.configure({ placeholder: "Start writing…" }),
+        CharacterCount,
+      ],
+      onUpdate: ({ editor }) => dispatch("update", editor.getJSON()),
+    });
   });
 
-  // Whether the *next* reactive run of the sync block below is our own
-  // emission coming back down as the `content` prop. Set right before
-  // dispatching, consumed on the very next Svelte tick.
-  //
-  // The previous approach compared the round-tripped HTML string against
-  // `editorEl.innerHTML` and skipped the rewrite when they matched — but
-  // contenteditable's live DOM is never guaranteed to byte-match a decode
-  // then re-encode of our own doc model (whitespace, attribute order,
-  // browser-specific normalization all differ), so that comparison failed
-  // constantly and `innerHTML` got overwritten mid-keystroke, throwing the
-  // caret to the start of the document. This flag sidesteps the whole
-  // problem: it doesn't care whether the content matches, only whether the
-  // change was ours.
-  let suppressNextSync = false;
-
-  $: if (ready && editorEl && content) {
-    if (suppressNextSync) {
-      suppressNextSync = false;
-    } else {
-      const incoming = docToHtml(content) || "<p><br></p>";
-      if (incoming !== editorEl.innerHTML) {
-        editorEl.innerHTML = incoming;
-        recount();
-      }
-    }
-  }
-
-  function emit() {
-    suppressNextSync = true;
-    const doc = htmlToDoc(editorEl);
-    dispatch("update", doc);
-    recount();
-  }
-
-  function recount() {
-    const text = docToText(htmlToDoc(editorEl)).trim();
-    counts = {
-      words: text ? text.split(/\s+/).length : 0,
-      chars: text.length,
-    };
-  }
-
-  function exec(command: string, value?: string) {
-    editorEl.focus();
-    document.execCommand(command, false, value);
-    syncActive();
-    emit();
-  }
-
-  function syncActive() {
-    if (!ready) return;
-    try {
-      active = {
-        bold: document.queryCommandState("bold"),
-        italic: document.queryCommandState("italic"),
-        underline: document.queryCommandState("underline"),
-        strike: document.queryCommandState("strikeThrough"),
-        ul: document.queryCommandState("insertUnorderedList"),
-        ol: document.queryCommandState("insertOrderedList"),
-        block: currentBlockTag(),
-      };
-    } catch {
-      // queryCommandState throws when the selection is outside the editor.
-    }
-  }
-
-  function currentBlockTag(): string {
-    const selection = window.getSelection();
-    let node = selection?.anchorNode ?? null;
-    while (node && node !== editorEl) {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const tag = (node as HTMLElement).tagName.toLowerCase();
-        if (["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre"].includes(tag)) return tag;
-      }
-      node = node.parentNode;
-    }
-    return "p";
-  }
-
   function setBlock(e: Event) {
-    const tag = (e.target as HTMLSelectElement).value;
-    // formatBlock is the one execCommand that needs the tag bracketed.
-    exec("formatBlock", `<${tag}>`);
+    const value = (e.target as HTMLSelectElement).value;
+    const chain = $editor.chain().focus();
+    if (value === "p") chain.setParagraph().run();
+    else if (value === "blockquote") chain.setBlockquote().run();
+    else if (value === "pre") chain.setCodeBlock().run();
+    else chain.setHeading({ level: Number(value[1]) as 2 | 3 | 4 }).run();
   }
 
   function saveSelection() {
-    const selection = window.getSelection();
-    savedRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
-  }
-
-  function restoreSelection() {
-    if (!savedRange) return;
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(savedRange);
+    const { from, to } = $editor.state.selection;
+    savedSelection = { from, to };
   }
 
   function openLinkDialog() {
     saveSelection();
-    linkUrl = "";
+    linkUrl = $editor.getAttributes("link").href ?? "";
     showLinkDialog = true;
   }
 
   function applyLink() {
     const url = linkUrl.trim();
     showLinkDialog = false;
-    if (!url) return;
-    editorEl.focus();
-    restoreSelection();
-    if (savedRange && savedRange.collapsed) {
-      // No selection: insert the URL as its own linked text.
-      document.execCommand("insertHTML", false, `<a href="${url}">${url}</a>`);
-    } else {
-      document.execCommand("createLink", false, url);
+    const chain = $editor.chain().focus();
+    if (savedSelection) chain.setTextSelection(savedSelection);
+    if (!url) {
+      chain.unsetLink().run();
+      return;
     }
-    emit();
+    if (savedSelection && savedSelection.from === savedSelection.to) {
+      chain.insertContent({ type: "text", text: url, marks: [{ type: "link", attrs: { href: url } }] }).run();
+    } else {
+      chain.extendMarkRange("link").setLink({ href: url }).run();
+    }
   }
 
   async function openImageDialog() {
@@ -205,79 +140,13 @@
   function insertImage(url: string, alt: string) {
     showImageDialog = false;
     if (!url.trim()) return;
-    editorEl.focus();
-    restoreSelection();
-    document.execCommand(
-      "insertHTML",
-      false,
-      `<img src="${url.trim()}" alt="${alt.trim().replace(/"/g, "&quot;")}">`,
-    );
-    emit();
+    const chain = $editor.chain().focus();
+    if (savedSelection) chain.setTextSelection(savedSelection);
+    chain.setImage({ src: url.trim(), alt: alt.trim() }).run();
   }
 
   function insertTable() {
-    editorEl.focus();
-    const cells = "<td><br></td>".repeat(3);
-    const header = "<th>Header</th>".repeat(3);
-    document.execCommand(
-      "insertHTML",
-      false,
-      `<table><tr>${header}</tr><tr>${cells}</tr><tr>${cells}</tr></table><p><br></p>`,
-    );
-    emit();
-  }
-
-  function insertDivider() {
-    exec("insertHorizontalRule");
-  }
-
-  function clearFormatting() {
-    exec("removeFormat");
-  }
-
-  /** Strips Word/Docs markup so pasted content survives serialization. */
-  function onPaste(e: ClipboardEvent) {
-    e.preventDefault();
-    const html = e.clipboardData?.getData("text/html");
-    const text = e.clipboardData?.getData("text/plain") ?? "";
-
-    if (html) {
-      const sandbox = document.createElement("div");
-      sandbox.innerHTML = html;
-      sandbox.querySelectorAll("script,style,meta,link").forEach((el) => el.remove());
-      sandbox.querySelectorAll<HTMLElement>("*").forEach((el) => {
-        const align = el.style.textAlign;
-        for (const attr of Array.from(el.attributes)) {
-          if (attr.name !== "href" && attr.name !== "src" && attr.name !== "alt") {
-            el.removeAttribute(attr.name);
-          }
-        }
-        if (align && align !== "left") el.style.textAlign = align;
-      });
-      document.execCommand("insertHTML", false, sandbox.innerHTML);
-    } else {
-      document.execCommand("insertText", false, text);
-    }
-    emit();
-  }
-
-  function onKeydown(e: KeyboardEvent) {
-    const mod = e.ctrlKey || e.metaKey;
-    if (!mod) return;
-    const key = e.key.toLowerCase();
-    if (key === "b") {
-      e.preventDefault();
-      exec("bold");
-    } else if (key === "i") {
-      e.preventDefault();
-      exec("italic");
-    } else if (key === "u") {
-      e.preventDefault();
-      exec("underline");
-    } else if (key === "k") {
-      e.preventDefault();
-      openLinkDialog();
-    }
+    $editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   }
 
   /** Svelte actions must be synchronous, so defer the focus rather than await. */
@@ -287,77 +156,142 @@
 </script>
 
 <div class="editor-shell">
-  <div class="toolbar">
-    <select class="block-select" value={active.block} on:change={setBlock} aria-label="Paragraph style">
-      {#each BLOCK_OPTIONS as option (option.value)}
-        <option value={option.value}>{option.label}</option>
-      {/each}
-    </select>
+  {#if $editor}
+    <div class="toolbar">
+      <select class="block-select" value={currentBlock} on:change={setBlock} aria-label="Paragraph style">
+        {#each BLOCK_OPTIONS as option (option.value)}
+          <option value={option.value}>{option.label}</option>
+        {/each}
+      </select>
 
-    <span class="divider"></span>
+      <span class="divider"></span>
 
-    <button type="button" class:on={active.bold} title="Bold (Ctrl+B)" on:click={() => exec("bold")}>
-      <b>B</b>
-    </button>
-    <button type="button" class:on={active.italic} title="Italic (Ctrl+I)" on:click={() => exec("italic")}>
-      <i>I</i>
-    </button>
-    <button type="button" class:on={active.underline} title="Underline (Ctrl+U)" on:click={() => exec("underline")}>
-      <u>U</u>
-    </button>
-    <button type="button" class:on={active.strike} title="Strikethrough" on:click={() => exec("strikeThrough")}>
-      <s>S</s>
-    </button>
+      <button
+        type="button"
+        class:on={$editor.isActive("bold")}
+        title="Bold (Ctrl+B)"
+        on:click={() => $editor.chain().focus().toggleBold().run()}
+      >
+        <b>B</b>
+      </button>
+      <button
+        type="button"
+        class:on={$editor.isActive("italic")}
+        title="Italic (Ctrl+I)"
+        on:click={() => $editor.chain().focus().toggleItalic().run()}
+      >
+        <i>I</i>
+      </button>
+      <button
+        type="button"
+        class:on={$editor.isActive("underline")}
+        title="Underline (Ctrl+U)"
+        on:click={() => $editor.chain().focus().toggleUnderline().run()}
+      >
+        <u>U</u>
+      </button>
+      <button
+        type="button"
+        class:on={$editor.isActive("strike")}
+        title="Strikethrough"
+        on:click={() => $editor.chain().focus().toggleStrike().run()}
+      >
+        <s>S</s>
+      </button>
 
-    <span class="divider"></span>
+      <span class="divider"></span>
 
-    <button type="button" class:on={active.ul} title="Bulleted list" on:click={() => exec("insertUnorderedList")}>
-      ☰
-    </button>
-    <button type="button" class:on={active.ol} title="Numbered list" on:click={() => exec("insertOrderedList")}>
-      ⒈
-    </button>
+      <button
+        type="button"
+        class:on={$editor.isActive("bulletList")}
+        title="Bulleted list"
+        on:click={() => $editor.chain().focus().toggleBulletList().run()}
+      >
+        ☰
+      </button>
+      <button
+        type="button"
+        class:on={$editor.isActive("orderedList")}
+        title="Numbered list"
+        on:click={() => $editor.chain().focus().toggleOrderedList().run()}
+      >
+        ⒈
+      </button>
 
-    <span class="divider"></span>
+      <span class="divider"></span>
 
-    <button type="button" title="Align left" on:click={() => exec("justifyLeft")}>⇤</button>
-    <button type="button" title="Align center" on:click={() => exec("justifyCenter")}>≡</button>
-    <button type="button" title="Align right" on:click={() => exec("justifyRight")}>⇥</button>
+      <button
+        type="button"
+        class:on={$editor.isActive({ textAlign: "left" })}
+        title="Align left"
+        on:click={() => $editor.chain().focus().setTextAlign("left").run()}
+      >
+        ⇤
+      </button>
+      <button
+        type="button"
+        class:on={$editor.isActive({ textAlign: "center" })}
+        title="Align center"
+        on:click={() => $editor.chain().focus().setTextAlign("center").run()}
+      >
+        ≡
+      </button>
+      <button
+        type="button"
+        class:on={$editor.isActive({ textAlign: "right" })}
+        title="Align right"
+        on:click={() => $editor.chain().focus().setTextAlign("right").run()}
+      >
+        ⇥
+      </button>
 
-    <span class="divider"></span>
+      <span class="divider"></span>
 
-    <button type="button" title="Insert link (Ctrl+K)" on:click={openLinkDialog}>🔗</button>
-    <button type="button" title="Insert image" on:click={openImageDialog}>🖼</button>
-    <button type="button" title="Insert table" on:click={insertTable}>▦</button>
-    <button type="button" title="Insert divider" on:click={insertDivider}>―</button>
+      <button type="button" class:on={$editor.isActive("link")} title="Insert link (Ctrl+K)" on:click={openLinkDialog}>
+        🔗
+      </button>
+      <button type="button" title="Insert image" on:click={openImageDialog}>🖼</button>
+      <button type="button" title="Insert table" on:click={insertTable}>▦</button>
+      <button type="button" title="Insert divider" on:click={() => $editor.chain().focus().setHorizontalRule().run()}>
+        ―
+      </button>
 
-    <span class="divider"></span>
+      <span class="divider"></span>
 
-    <button type="button" title="Clear formatting" on:click={clearFormatting}>✕</button>
-    <button type="button" title="Undo (Ctrl+Z)" on:click={() => exec("undo")}>↶</button>
-    <button type="button" title="Redo (Ctrl+Shift+Z)" on:click={() => exec("redo")}>↷</button>
+      <button
+        type="button"
+        title="Clear formatting"
+        on:click={() => $editor.chain().focus().unsetAllMarks().clearNodes().run()}
+      >
+        ✕
+      </button>
+      <button
+        type="button"
+        title="Undo (Ctrl+Z)"
+        disabled={!$editor.can().undo()}
+        on:click={() => $editor.chain().focus().undo().run()}
+      >
+        ↶
+      </button>
+      <button
+        type="button"
+        title="Redo (Ctrl+Shift+Z)"
+        disabled={!$editor.can().redo()}
+        on:click={() => $editor.chain().focus().redo().run()}
+      >
+        ↷
+      </button>
+    </div>
+  {/if}
+
+  <div class="surface">
+    <EditorContent editor={$editor} />
   </div>
 
-  <div
-    class="surface"
-    bind:this={editorEl}
-    contenteditable="true"
-    role="textbox"
-    tabindex="0"
-    aria-multiline="true"
-    aria-label="Page content"
-    on:input={emit}
-    on:paste={onPaste}
-    on:keydown={onKeydown}
-    on:keyup={syncActive}
-    on:mouseup={syncActive}
-    on:focus={syncActive}
-  ></div>
-
   <div class="statusbar">
-    <span>{counts.words} words</span>
+    <span>{$editor?.storage.characterCount.words() ?? 0} words</span>
     <span>·</span>
-    <span>{counts.chars} characters</span>
+    <span>{$editor?.storage.characterCount.characters() ?? 0} characters</span>
   </div>
 </div>
 
@@ -468,6 +402,14 @@
     background: var(--surface);
     border-color: var(--border-strong);
   }
+  .toolbar button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .toolbar button:disabled:hover {
+    background: transparent;
+    border-color: transparent;
+  }
   .toolbar button.on {
     background: var(--brand-100);
     border-color: var(--brand-200);
@@ -491,8 +433,17 @@
     max-height: 60vh;
     overflow-y: auto;
     padding: 1.5rem 1.75rem;
-    outline: none;
     line-height: 1.7;
+  }
+  .surface :global(.tiptap) {
+    outline: none;
+  }
+  .surface :global(.tiptap p.is-editor-empty:first-child::before) {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: var(--fg-subtle, var(--fg-muted));
+    pointer-events: none;
   }
   .surface :global(h2),
   .surface :global(h3),
@@ -518,6 +469,11 @@
     overflow-x: auto;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     font-size: 0.85rem;
+  }
+  .surface :global(pre code) {
+    background: none;
+    color: inherit;
+    padding: 0;
   }
   .surface :global(code) {
     font-family: ui-monospace, "SF Mono", Menlo, monospace;

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RichTextBlock } from "@journal/shared-types";
-  import type { TiptapDoc } from "../serialize";
+  import type { TiptapDoc } from "../content";
   import RichEditor from "../RichEditor.svelte";
 
   export let props: RichTextBlock["props"];
