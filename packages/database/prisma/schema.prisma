@@ -92,6 +92,11 @@ model JournalSource {
   oaiSetSpec    String?
   /// Reference into the secret store, never the credential itself (PRD §32).
   credentialRef String?
+  /// Optional second OJS/OAI instance — a journal that migrated sites keeps
+  /// an "old" and "new" endpoint, and both get harvested into one history.
+  ojsUrl2       String?
+  oaiEndpoint2  String?
+  oaiSetSpec2   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -253,6 +258,9 @@ model Article {
   url             String?
   slug            String
   publicationDate DateTime?
+  /// Cover/thumbnail image, set manually in the admin — OAI-PMH's Dublin
+  /// Core metadata carries no image, so this is never populated by a sync.
+  thumbnailUrl    String?
   /// Raw OAI-PMH record, kept for debugging/re-normalization.
   rawMetadata     Json?
   createdAt       DateTime  @default(now())

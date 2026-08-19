@@ -26,6 +26,10 @@ function renderMarks(text: string, marks: TiptapNode["marks"] = []): string {
         return `<strong>${html}</strong>`;
       case "italic":
         return `<em>${html}</em>`;
+      case "underline":
+        return `<u>${html}</u>`;
+      case "strike":
+        return `<s>${html}</s>`;
       case "code":
         return `<code>${html}</code>`;
       case "link":
@@ -63,6 +67,8 @@ function renderNode(node: TiptapNode): string {
       return `<li>${children}</li>`;
     case "blockquote":
       return `<blockquote>${children}</blockquote>`;
+    case "horizontalRule":
+      return "<hr />";
     case "codeBlock":
       return `<pre><code>${children}</code></pre>`;
     case "image":

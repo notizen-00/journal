@@ -1,39 +1,58 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { login } from "$lib/api";
+  import { toastError } from "$lib/toast";
+  import "../../app.css";
 
   let email = "";
   let password = "";
-  let error = "";
   let loading = false;
 
   async function submit() {
     loading = true;
-    error = "";
     try {
       await login(email, password);
       await goto("/journals");
     } catch (err) {
-      error = (err as Error).message;
+      toastError(err, "Sign in failed");
     } finally {
       loading = false;
     }
   }
 </script>
 
+<svelte:head><title>Sign in · Journal Publisher</title></svelte:head>
+
 <div class="login-page">
-  <form on:submit|preventDefault={submit}>
-    <h1>Journal Publisher</h1>
-    <label>
-      Email
-      <input type="email" bind:value={email} required />
-    </label>
-    <label>
-      Password
-      <input type="password" bind:value={password} required />
-    </label>
-    {#if error}<p class="error">{error}</p>{/if}
-    <button type="submit" disabled={loading}>{loading ? "Signing in..." : "Sign in"}</button>
+  <form class="login-card" on:submit|preventDefault={submit}>
+    <div class="brand">
+      <span class="brand-mark">JP</span>
+      <div>
+        <h1>Journal Publisher</h1>
+        <p class="muted">Sign in to manage your journals</p>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="email">Email</label>
+      <input id="email" type="email" bind:value={email} required autocomplete="username" />
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <input
+        id="password"
+        type="password"
+        bind:value={password}
+        required
+        autocomplete="current-password"
+      />
+    </div>
+
+    <button type="submit" class="btn btn-primary submit" disabled={loading}>
+      {#if loading}<span class="spinner"></span>{/if}
+      {loading ? "Signing in…" : "Sign in"}
+    </button>
   </form>
 </div>
 
@@ -43,39 +62,46 @@
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    background: #f3f4f6;
+    padding: 1.5rem;
+    background: linear-gradient(140deg, #101828 0%, #1e3a8a 100%);
   }
-  form {
+  .login-card {
     display: flex;
     flex-direction: column;
+    gap: 1rem;
+    width: min(23rem, 100%);
+    padding: 1.75rem;
+    background: var(--surface);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
     gap: 0.75rem;
-    width: 320px;
-    padding: 2rem;
-    background: #fff;
-    border-radius: 0.5rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-bottom: 0.25rem;
   }
-  label {
+  .brand-mark {
     display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    font-size: 0.875rem;
-  }
-  input {
-    padding: 0.5rem;
-    border: 1px solid #d1d5db;
-    border-radius: 0.375rem;
-  }
-  button {
-    padding: 0.6rem;
-    border: none;
-    border-radius: 0.375rem;
-    background: #1d4ed8;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: var(--radius);
+    background: var(--brand-600);
     color: #fff;
-    cursor: pointer;
+    font-weight: 700;
+    flex-shrink: 0;
   }
-  .error {
-    color: #dc2626;
-    font-size: 0.875rem;
+  .brand h1 {
+    font-size: 1.1rem;
+  }
+  .brand p {
+    font-size: 0.8125rem;
+    margin-top: 0.1rem;
+  }
+  .submit {
+    margin-top: 0.35rem;
+    padding: 0.6rem;
   }
 </style>

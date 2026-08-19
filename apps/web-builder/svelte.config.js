@@ -10,7 +10,11 @@ const config = {
     adapter: adapter({
       pages: outDir,
       assets: outDir,
-      fallback: undefined,
+      // Rendered from src/routes/+error.svelte and served by nginx for any
+      // path that doesn't match a prerendered page, so broken/typo'd links
+      // get a real "not found" page instead of nginx's bare 404 or (as
+      // before) silently serving the homepage.
+      fallback: "404.html",
       strict: true,
     }),
     prerender: {

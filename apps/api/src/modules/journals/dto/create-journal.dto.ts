@@ -11,6 +11,19 @@ class JournalSourceDto {
   @IsOptional()
   @IsString()
   oaiSetSpec?: string;
+
+  /** A journal that migrated OJS sites keeps harvesting its old archive too. */
+  @IsOptional()
+  @IsString()
+  ojsUrl2?: string;
+
+  @IsOptional()
+  @IsString()
+  oaiEndpoint2?: string;
+
+  @IsOptional()
+  @IsString()
+  oaiSetSpec2?: string;
 }
 
 export class CreateJournalDto {

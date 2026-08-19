@@ -14,6 +14,7 @@ import { IssuesModule } from "./modules/issues/issues.module";
 import { SyncModule } from "./modules/sync/sync.module";
 import { BuildsModule } from "./modules/builds/builds.module";
 import { DeploymentsModule } from "./modules/deployments/deployments.module";
+import { EventsModule } from "./modules/events/events.module";
 import { PublicModule } from "./modules/public/public.module";
 
 @Module({
@@ -37,6 +38,7 @@ import { PublicModule } from "./modules/public/public.module";
     SyncModule,
     BuildsModule,
     DeploymentsModule,
+    EventsModule,
     PublicModule,
   ],
   controllers: [AppController],

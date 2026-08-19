@@ -10,9 +10,7 @@
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@tiptap/core": "^2.8.0",
-    "@tiptap/pm": "^2.8.0",
-    "@tiptap/starter-kit": "^2.8.0"
+    "@journal/shared-types": "workspace:*"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.7",

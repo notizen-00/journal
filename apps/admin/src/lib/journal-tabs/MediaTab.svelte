@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { api } from "$lib/api";
+  import { toasts, toastError } from "$lib/toast";
+  import EmptyState from "$lib/components/EmptyState.svelte";
+  import Pagination from "$lib/components/Pagination.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
 
   export let journalId: string;
 
@@ -13,90 +17,254 @@
   }
 
   let media: Media[] = [];
+  let loading = true;
   let uploading = false;
-  let error = "";
+  let dragOver = false;
+  let deleteTarget: Media | null = null;
+
+  let page = 1;
+  let pageSize = 20;
+  $: paged = media.slice((page - 1) * pageSize, page * pageSize);
 
   async function load() {
+    loading = true;
     try {
       media = await api.get<Media[]>(`/journals/${journalId}/media`);
     } catch (err) {
-      error = (err as Error).message;
+      toastError(err, "Could not load media");
+    } finally {
+      loading = false;
     }
   }
 
-  async function onFileChange(e: Event) {
-    const file = (e.target as HTMLInputElement).files?.[0];
-    if (!file) return;
+  async function uploadFiles(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
     uploading = true;
-    error = "";
+    let succeeded = 0;
     try {
-      await api.upload(`/journals/${journalId}/media`, file);
-      await load();
-    } catch (err) {
-      error = (err as Error).message;
+      for (const file of list) {
+        try {
+          await api.upload(`/journals/${journalId}/media`, file);
+          succeeded++;
+        } catch (err) {
+          toastError(err, `Could not upload ${file.name}`);
+        }
+      }
+      if (succeeded > 0) {
+        toasts.success(`Uploaded ${succeeded} file${succeeded === 1 ? "" : "s"}`);
+        await load();
+      }
     } finally {
       uploading = false;
     }
   }
 
-  async function remove(id: string) {
-    await api.del(`/media/${id}`);
-    await load();
+  function onFileChange(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (input.files) void uploadFiles(input.files);
+    input.value = "";
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    dragOver = false;
+    if (e.dataTransfer?.files) void uploadFiles(e.dataTransfer.files);
+  }
+
+  async function confirmDelete() {
+    const target = deleteTarget;
+    deleteTarget = null;
+    if (!target) return;
+    try {
+      await api.del(`/media/${target.id}`);
+      toasts.success(`Deleted ${target.fileName}`);
+      await load();
+    } catch (err) {
+      toastError(err, "Could not delete file");
+    }
+  }
+
+  async function copyUrl(item: Media) {
+    try {
+      await navigator.clipboard.writeText(item.url);
+      toasts.success("URL copied to clipboard");
+    } catch {
+      toasts.error("Could not access the clipboard");
+    }
+  }
+
+  function formatSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   }
 
   onMount(load);
 </script>
 
-<h2>Media</h2>
-{#if error}<p class="error">{error}</p>{/if}
-
-<input type="file" on:change={onFileChange} disabled={uploading} />
-
-<div class="grid">
-  {#each media as item (item.id)}
-    <div class="card">
-      {#if item.mimeType.startsWith("image/")}
-        <img src={item.url} alt={item.fileName} />
-      {/if}
-      <p class="name">{item.fileName}</p>
-      <button on:click={() => remove(item.id)}>Delete</button>
+<div class="card">
+  <div class="card-header">
+    <div>
+      <h2>Media</h2>
+      <p class="muted sub">Images and files owned by this journal, stored separately from OJS.</p>
     </div>
-  {/each}
+  </div>
+
+  <div class="card-body">
+    <div
+      class="dropzone"
+      class:drag={dragOver}
+      role="button"
+      tabindex="0"
+      on:dragover|preventDefault={() => (dragOver = true)}
+      on:dragleave={() => (dragOver = false)}
+      on:drop={onDrop}
+    >
+      {#if uploading}
+        <span class="spinner"></span>
+        <span>Uploading…</span>
+      {:else}
+        <strong>Drop files here</strong>
+        <span class="muted">or</span>
+        <label class="btn btn-secondary btn-sm file-label">
+          Choose files
+          <input type="file" multiple on:change={onFileChange} disabled={uploading} />
+        </label>
+      {/if}
+    </div>
+  </div>
+
+  {#if loading}
+    <div class="card-body"><p class="muted">Loading media…</p></div>
+  {:else if media.length === 0}
+    <EmptyState title="No media yet" message="Upload images to use in pages and the journal logo." />
+  {:else}
+    <div class="card-body grid">
+      {#each paged as item (item.id)}
+        <div class="media-card">
+          <div class="thumb">
+            {#if item.mimeType.startsWith("image/")}
+              <img src={item.url} alt={item.fileName} loading="lazy" />
+            {:else}
+              <span class="file-icon">{item.mimeType.split("/")[1]?.toUpperCase() ?? "FILE"}</span>
+            {/if}
+          </div>
+          <p class="name" title={item.fileName}>{item.fileName}</p>
+          <p class="meta muted">{formatSize(item.size)}</p>
+          <div class="media-actions">
+            <button class="btn btn-secondary btn-sm" on:click={() => copyUrl(item)}>Copy URL</button>
+            <button class="btn btn-ghost btn-sm danger" on:click={() => (deleteTarget = item)}>Delete</button>
+          </div>
+        </div>
+      {/each}
+    </div>
+    <Pagination
+      {page}
+      {pageSize}
+      total={media.length}
+      pageSizeOptions={[12, 20, 40]}
+      on:change={(e) => ({ page, pageSize } = e.detail)}
+    />
+  {/if}
 </div>
 
+<ConfirmDialog
+  open={deleteTarget !== null}
+  title="Delete this file?"
+  message={`"${deleteTarget?.fileName ?? ""}" will be removed permanently. Pages still referencing it will show a broken image.`}
+  confirmLabel="Delete"
+  danger
+  on:confirm={confirmDelete}
+  on:cancel={() => (deleteTarget = null)}
+/>
+
 <style>
+  .sub {
+    margin-top: 0.15rem;
+    font-size: 0.8125rem;
+  }
+  .dropzone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    padding: 1.75rem 1rem;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--surface-2);
+    font-size: 0.875rem;
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .dropzone.drag {
+    border-color: var(--brand-500);
+    background: var(--brand-50);
+  }
+  .file-label {
+    position: relative;
+    overflow: hidden;
+  }
+  .file-label input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    padding: 0;
+    border: none;
+  }
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
     gap: 1rem;
-    margin-top: 1rem;
+    padding-top: 0;
   }
-  .card {
-    background: #fff;
-    border: 1px solid #e5e7eb;
-    border-radius: 0.5rem;
-    padding: 0.5rem;
+  .media-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.6rem;
+    background: var(--surface);
   }
-  .card img {
+  .thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 7rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .thumb img {
     width: 100%;
-    height: 100px;
+    height: 100%;
     object-fit: cover;
-    border-radius: 0.25rem;
+  }
+  .file-icon {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--fg-muted);
+    letter-spacing: 0.05em;
   }
   .name {
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .meta {
     font-size: 0.75rem;
-    word-break: break-all;
   }
-  button {
-    width: 100%;
-    padding: 0.3rem;
-    border: none;
-    border-radius: 0.25rem;
-    background: #dc2626;
-    color: #fff;
-    cursor: pointer;
+  .media-actions {
+    display: flex;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
   }
-  .error {
-    color: #dc2626;
+  .media-actions .btn {
+    flex: 1;
+  }
+  .danger {
+    color: var(--danger);
   }
 </style>

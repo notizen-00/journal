@@ -38,11 +38,26 @@ function textOf(node: unknown): string {
  * the format OJS exposes by default). Callers loop using the returned
  * resumptionToken until it comes back null (PRD §7-9).
  */
+export type OaiGranularity = "seconds" | "date";
+
+/**
+ * OAI-PMH only accepts `YYYY-MM-DD` or `YYYY-MM-DDThh:mm:ssZ`. A raw
+ * `Date.toISOString()` carries milliseconds, which repositories reject with
+ * `badArgument` — that silently broke every incremental harvest.
+ */
+export function formatOaiDate(iso: string, granularity: OaiGranularity): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const seconds = date.toISOString().replace(/\.\d+Z$/, "Z");
+  return granularity === "date" ? seconds.slice(0, 10) : seconds;
+}
+
 export async function listRecords(params: {
   endpoint: string;
   from?: string;
   set?: string;
   resumptionToken?: string;
+  granularity?: OaiGranularity;
 }): Promise<ListRecordsResult> {
   const url = new URL(params.endpoint);
   url.searchParams.set("verb", "ListRecords");
@@ -51,7 +66,9 @@ export async function listRecords(params: {
     url.searchParams.set("resumptionToken", params.resumptionToken);
   } else {
     url.searchParams.set("metadataPrefix", "oai_dc");
-    if (params.from) url.searchParams.set("from", params.from);
+    if (params.from) {
+      url.searchParams.set("from", formatOaiDate(params.from, params.granularity ?? "seconds"));
+    }
     if (params.set) url.searchParams.set("set", params.set);
   }
 
@@ -107,15 +124,30 @@ export async function harvestAll(params: {
   endpoint: string;
   from?: string;
   set?: string;
+  granularity?: OaiGranularity;
 }): Promise<OaiRecord[]> {
-  const all: OaiRecord[] = [];
-  let resumptionToken: string | undefined;
+  const drain = async (granularity: OaiGranularity) => {
+    const all: OaiRecord[] = [];
+    let resumptionToken: string | undefined;
 
-  do {
-    const page = await listRecords({ ...params, resumptionToken });
-    all.push(...page.records);
-    resumptionToken = page.resumptionToken ?? undefined;
-  } while (resumptionToken);
+    do {
+      const page = await listRecords({ ...params, granularity, resumptionToken });
+      all.push(...page.records);
+      resumptionToken = page.resumptionToken ?? undefined;
+    } while (resumptionToken);
 
-  return all;
+    return all;
+  };
+
+  try {
+    return await drain(params.granularity ?? "seconds");
+  } catch (error) {
+    // Repositories may advertise only day granularity (`YYYY-MM-DD`) and
+    // reject a timestamped `from`. Fall back once before giving up.
+    const message = (error as Error).message ?? "";
+    if (params.from && message.includes("badArgument")) {
+      return drain("date");
+    }
+    throw error;
+  }
 }

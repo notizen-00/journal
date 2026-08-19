@@ -1,8 +1,11 @@
 <script lang="ts">
   import BlockRenderer from "$lib/blocks/BlockRenderer.svelte";
+  import { getThemeSettings } from "$lib/themes";
   import type { PageData } from "./$types";
 
   export let data: PageData;
+
+  $: heroImageUrl = getThemeSettings(data.journal)?.heroImageUrl;
 
   $: primaryMenu = data.menus.find((m) => m.location === "primary");
   $: onlineSubmissionUrl = primaryMenu?.items.find((i) => i.label === "Online Submission")?.url;
@@ -25,7 +28,7 @@
     .slice(0, 6);
 </script>
 
-<section class="hero">
+<section class="hero" class:has-image={!!heroImageUrl}>
   <div class="hero-inner">
     {#if data.journal.logoUrl}
       <img src={data.journal.logoUrl} alt={data.journal.name} class="hero-logo" />
@@ -59,6 +62,9 @@
         <div class="article-grid">
           {#each recentArticles as article (article.id)}
             <a class="article-card" href={`/articles/${article.slug}/`}>
+              {#if article.thumbnailUrl}
+                <img class="card-thumb" src={article.thumbnailUrl} alt="" loading="lazy" />
+              {/if}
               <h3>{article.title}</h3>
               {#if article.abstract}<p class="excerpt">{article.abstract.slice(0, 140)}…</p>{/if}
               <div class="card-meta">
@@ -90,6 +96,13 @@
     background: linear-gradient(135deg, var(--theme-primary, #1d4ed8), var(--theme-secondary, #0ea5e9));
     color: #fff;
     padding: 4rem 1.5rem;
+  }
+  .hero.has-image {
+    /* Scrim over the custom image keeps hero text readable regardless of
+       what the image looks like, while still showing it clearly. */
+    background:
+      linear-gradient(135deg, rgba(15, 23, 42, 0.72), rgba(15, 23, 42, 0.45)),
+      var(--theme-hero-image) center/cover no-repeat;
   }
   .hero-inner {
     max-width: 48rem;
@@ -203,6 +216,13 @@
     text-decoration: none;
     color: inherit;
     transition: box-shadow 0.15s ease, transform 0.15s ease;
+  }
+  .card-thumb {
+    width: calc(100% + 2.5rem);
+    height: 9rem;
+    margin: -1.25rem -1.25rem 0.25rem;
+    object-fit: cover;
+    border-radius: 0.75rem 0.75rem 0 0;
   }
   .article-card:hover {
     box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);

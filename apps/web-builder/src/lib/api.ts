@@ -25,6 +25,7 @@ export interface JournalData {
   eissn: string | null;
   description: string | null;
   logoUrl: string | null;
+  themeId: string | null;
   theme: { key: string } | null;
   themeSettings: { themeId: string; settings: Record<string, unknown> }[];
 }
@@ -49,6 +50,7 @@ export interface ArticleData {
   title: string;
   abstract: string | null;
   slug: string;
+  thumbnailUrl: string | null;
   doi: string | null;
   pages: string | null;
   url: string | null;

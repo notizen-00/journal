@@ -35,12 +35,34 @@ export function createOaiHarvestWorker(connection: typeof connectionOptions) {
         return;
       }
 
+      // A journal that migrated OJS sites keeps an "old" and "new" endpoint
+      // configured — both get harvested into the same run so their history
+      // merges into one article list.
+      const sources = [
+        { endpoint: journal.source.oaiEndpoint, set: journal.source.oaiSetSpec ?? undefined },
+        ...(journal.source.oaiEndpoint2
+          ? [{ endpoint: journal.source.oaiEndpoint2, set: journal.source.oaiSetSpec2 ?? undefined }]
+          : []),
+      ];
+
       try {
-        const records = await harvestAll({
-          endpoint: journal.source.oaiEndpoint,
-          from: syncRun.fromDate?.toISOString(),
-          set: journal.source.oaiSetSpec ?? undefined,
-        });
+        // Settled independently: an old, possibly-deprecated endpoint
+        // failing outright must not discard records already harvested
+        // from a healthy one.
+        const results = await Promise.allSettled(
+          sources.map((source) =>
+            harvestAll({
+              endpoint: source.endpoint,
+              from: syncRun.fromDate?.toISOString(),
+              set: source.set,
+            }),
+          ),
+        );
+
+        const records = results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+        const sourceErrors = results
+          .map((result, i) => (result.status === "rejected" ? { source: sources[i].endpoint, error: result.reason as Error } : null))
+          .filter((x): x is { source: string; error: Error } => x !== null);
 
         for (const record of records) {
           try {
@@ -134,9 +156,27 @@ export function createOaiHarvestWorker(connection: typeof connectionOptions) {
           }
         }
 
+        if (sourceErrors.length === sources.length) {
+          // Every configured source failed outright — nothing was harvested.
+          throw new Error(sourceErrors.map((e) => `${e.source}: ${e.error.message}`).join("; "));
+        }
+
         await prisma.syncRun.update({
           where: { id: syncRunId },
-          data: { status: "SUCCESS", toDate: new Date(), finishedAt: new Date() },
+          data: {
+            status: "SUCCESS",
+            toDate: new Date(),
+            finishedAt: new Date(),
+            // One source can fail while another succeeds (e.g. a
+            // decommissioned legacy site) — still a successful run, but
+            // flagged so the operator notices the gap.
+            errorMessage:
+              sourceErrors.length > 0
+                ? `Harvested from ${sources.length - sourceErrors.length}/${sources.length} sources. Failed: ${sourceErrors
+                    .map((e) => `${e.source} (${e.error.message})`)
+                    .join(", ")}`
+                : null,
+          },
         });
       } catch (error) {
         await prisma.syncRun.update({

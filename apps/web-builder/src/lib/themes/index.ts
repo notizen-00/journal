@@ -34,17 +34,33 @@ const presets: Record<string, Record<string, string>> = {
   },
 };
 
+/**
+ * ThemeSetting.themeId holds the Theme's uuid, so it must be matched
+ * against the journal's themeId — not against the theme's `key` slug,
+ * which never matches and silently discarded every per-journal override.
+ */
+export function getThemeSettings(journal: JournalData): Record<string, string> | undefined {
+  return journal.themeSettings.find((s) => s.themeId === journal.themeId)?.settings as
+    | Record<string, string>
+    | undefined;
+}
+
 export function resolveThemeVars(journal: JournalData): string {
   const key = journal.theme?.key ?? "default";
   const vars = { ...(presets[key] ?? presets.default) };
+  const settings = getThemeSettings(journal);
 
-  const settings = journal.themeSettings.find((s) => s.themeId === journal.theme?.key)?.settings as
-    | Record<string, string>
-    | undefined;
-
+  if (settings?.heroImageUrl) vars["--theme-hero-image"] = `url('${settings.heroImageUrl}')`;
   if (settings?.primaryColor) vars["--theme-primary"] = settings.primaryColor;
   if (settings?.secondaryColor) vars["--theme-secondary"] = settings.secondaryColor;
-  if (settings?.font) vars["--theme-font"] = settings.font;
+  if (settings?.font) {
+    // Editors pick a family name ("Inter"), not a full stack — keep a
+    // fallback so a font that fails to load doesn't drop to the browser default.
+    const family = settings.font.trim();
+    vars["--theme-font"] = family.includes(",")
+      ? family
+      : `'${family.replace(/^['"]|['"]$/g, "")}', system-ui, sans-serif`;
+  }
 
   return Object.entries(vars)
     .map(([k, v]) => `${k}:${v}`)
