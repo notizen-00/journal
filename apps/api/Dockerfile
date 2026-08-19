@@ -20,6 +20,7 @@ RUN pnpm --filter @journal/api build
 RUN pnpm deploy --filter=@journal/api --prod /out/api
 
 FROM node:20-alpine AS runtime
+RUN apk add --no-cache openssl
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build /out/api ./

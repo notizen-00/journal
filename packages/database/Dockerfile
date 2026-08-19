@@ -3,6 +3,7 @@
 # migrations before api/worker start (kept separate from the api runtime
 # image so the pruned production image doesn't need the prisma CLI).
 FROM node:20-alpine AS base
+RUN apk add --no-cache openssl
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /repo
 
