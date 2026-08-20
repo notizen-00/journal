@@ -22,6 +22,7 @@ const presets: Record<string, Record<string, string>> = {
     "--theme-fg": "#0f172a",
     "--theme-muted": "#64748b",
     "--theme-border": "#1e293b",
+    "--theme-surface": "#f1f5f9",
     "--theme-font": "'Inter', system-ui, sans-serif",
   },
   journal: {
@@ -30,6 +31,7 @@ const presets: Record<string, Record<string, string>> = {
     "--theme-fg": "#1c1917",
     "--theme-muted": "#78716c",
     "--theme-border": "#d6d3d1",
+    "--theme-surface": "#f5f5f4",
     "--theme-font": "'Georgia', 'Times New Roman', serif",
   },
 };

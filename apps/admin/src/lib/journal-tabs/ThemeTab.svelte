@@ -454,6 +454,23 @@
                 <div class="pv-card"><span class="pv-line w80"></span><span class="pv-line w60"></span></div>
                 <div class="pv-card"><span class="pv-line w70"></span><span class="pv-line w50"></span></div>
               </div>
+
+              <!-- Mirrors the elements the rich editor can produce, so the
+                   theme's effect on page content is visible here rather than
+                   only after a build. -->
+              <div class="pv-rich">
+                <span class="pv-rich-label">Rich text content</span>
+                <h5>Section heading</h5>
+                <p>
+                  A paragraph with an <a href={"#preview"} on:click|preventDefault>inline link</a> and
+                  <strong>bold text</strong>.
+                </p>
+                <blockquote>Quotes take the primary color on their rule.</blockquote>
+                <table>
+                  <thead><tr><th>Column</th><th>Column</th></tr></thead>
+                  <tbody><tr><td>Cell</td><td>Cell</td></tr></tbody>
+                </table>
+              </div>
             </div>
           </div>
           <p class="muted preview-note">
@@ -871,6 +888,58 @@
   .w50 {
     width: 50%;
   }
+  /* Rich-text sample — same tokens the published RichTextBlock uses, so
+     what shows here is what a build produces for page content. */
+  .pv-rich {
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px dashed var(--border);
+  }
+  .pv-rich-label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-subtle, var(--fg-muted));
+  }
+  .pv-rich h5 {
+    margin: 0 0 0.3rem;
+    font-size: 0.78rem;
+    line-height: 1.3;
+  }
+  .pv-rich p {
+    margin: 0 0 0.4rem;
+  }
+  .pv-rich a {
+    color: var(--p);
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+  }
+  .pv-rich blockquote {
+    margin: 0 0 0.5rem;
+    padding: 0.15rem 0 0.15rem 0.6rem;
+    border-left: 3px solid var(--p);
+    color: var(--fg-muted);
+    font-size: 0.72rem;
+    font-style: italic;
+  }
+  .pv-rich table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.68rem;
+  }
+  .pv-rich th,
+  .pv-rich td {
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.4rem;
+    text-align: left;
+  }
+  .pv-rich th {
+    background: var(--surface-2);
+    font-weight: 600;
+  }
+
   .preview-note {
     margin-top: 0.75rem;
     font-size: 0.75rem;
