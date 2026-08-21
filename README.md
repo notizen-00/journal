@@ -91,6 +91,51 @@ pnpm --filter @journal/worker dev
 locally, run that build command directly with `JOURNAL_ID`, `API_BASE_URL`, and
 `INTERNAL_API_TOKEN` set, pointing at a running api.
 
+## Iterating without rebuilding everything
+
+Rebuilding an image is the slow path: even a fully cached `docker compose build admin`
+costs ~3 minutes, because the whole image still has to be exported. Don't rebuild to
+iterate — rebuild only to ship.
+
+**While editing — no Docker rebuild at all.** Keep infra in containers and run the app
+you're changing natively, with hot reload:
+
+```bash
+pnpm infra:up                      # postgres, redis, minio, api
+docker compose stop admin          # free port 5174 for the dev server
+pnpm --filter @journal/admin dev   # http://localhost:5174, HMR, ready in ~1s
+```
+
+**When you want it in the container — one service only.** `docker compose up -d --build admin`
+also rebuilds and restarts everything `admin` depends on; `--no-deps` is what keeps it to
+one service (~18s once the image is built):
+
+```bash
+pnpm deploy:admin    # build admin + restart just that container
+```
+
+Note that `docker compose exec admin pnpm build` does **not** work: the runtime image is a
+minimal production stage (`node:20-alpine`, prod deps + `build/` only). It has no source,
+no Vite, and no dev dependencies — and the source is baked in at image-build time, so
+editing files on the host would not be visible inside it anyway.
+
+Which service to redeploy for a given change:
+
+| You changed | Redeploy |
+| --- | --- |
+| `apps/admin` | `pnpm deploy:admin` |
+| `apps/api` | `pnpm deploy:api` |
+| `apps/worker` **or `apps/web-builder`** | `pnpm deploy:worker` |
+| `infra/nginx` | `pnpm deploy:nginx` |
+
+`web-builder` has no container of its own — the worker image bakes the whole repo at
+`/repo` and shells out to it per build job. So a theme or block change reaches the public
+site only after `pnpm deploy:worker`, followed by a new build for the journal.
+
+Rebuild cost depends on what you touched: editing source re-runs only the last layers,
+but changing any `package.json` or `pnpm-lock.yaml` invalidates the cached
+`pnpm install` layer and makes the build much slower.
+
 ## Common scripts
 
 | Command | Effect |
@@ -102,6 +147,12 @@ locally, run that build command directly with `JOURNAL_ID`, `API_BASE_URL`, and
 | `pnpm db:migrate` | Create/apply a dev migration (needs a running Postgres) |
 | `pnpm db:deploy` | Apply committed migrations (what `docker compose` runs) |
 | `pnpm db:seed` | Re-run the seed script (idempotent) |
+| `pnpm infra:up` | Start only postgres/redis/minio/api, for running an app natively |
+| `pnpm infra:down` | Stop those infra containers |
+| `pnpm deploy:admin` | Rebuild + restart **only** the admin container |
+| `pnpm deploy:api` | Rebuild + restart **only** the api container |
+| `pnpm deploy:worker` | Rebuild + restart **only** the worker (also ships `web-builder`) |
+| `pnpm deploy:nginx` | Rebuild + restart **only** nginx |
 
 ## Known limitations
 

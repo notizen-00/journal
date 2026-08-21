@@ -15,7 +15,15 @@
     "db:generate": "pnpm --filter @journal/database generate",
     "db:migrate": "pnpm --filter @journal/database migrate:dev",
     "db:deploy": "pnpm --filter @journal/database migrate:deploy",
-    "db:seed": "pnpm --filter @journal/database seed"
+    "db:seed": "pnpm --filter @journal/database seed",
+
+    "infra:up": "docker compose up -d postgres redis minio minio-init api",
+    "infra:down": "docker compose stop postgres redis minio api",
+
+    "deploy:admin": "docker compose build admin && docker compose up -d --no-deps admin",
+    "deploy:api": "docker compose build api && docker compose up -d --no-deps api",
+    "deploy:worker": "docker compose build worker && docker compose up -d --no-deps worker",
+    "deploy:nginx": "docker compose build nginx && docker compose up -d --no-deps nginx"
   },
   "devDependencies": {
     "turbo": "^2.1.3",

@@ -127,7 +127,7 @@
       <div class="field span-2">
         <label for="j-oai">OAI endpoint</label>
         <input id="j-oai" bind:value={form.oaiEndpoint} placeholder="https://…/index.php/XXX/oai" />
-        <span class="field-hint">Both OJS URL and OAI endpoint are needed to enable harvesting.</span>
+        <span class="field-hint">Both OJS URL and OAI endpoint are needed to enable harvestingssss.</span>
       </div>
 
       <div class="span-2">
